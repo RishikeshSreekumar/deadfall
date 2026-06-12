@@ -2,13 +2,40 @@
   "name": "deadfall",
   "version": "0.1.0",
   "description": "Dev tool to map React/Next.js component usage and dead components as a static graph.",
+  "license": "MIT",
+  "author": "Rishikesh S",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/RishikeshSreekumar/deadfall.git"
+  },
+  "homepage": "https://github.com/RishikeshSreekumar/deadfall#readme",
+  "bugs": {
+    "url": "https://github.com/RishikeshSreekumar/deadfall/issues"
+  },
+  "keywords": [
+    "react",
+    "nextjs",
+    "next",
+    "dead-code",
+    "dead-components",
+    "unused",
+    "component-graph",
+    "static-analysis",
+    "ts-morph",
+    "typescript",
+    "cli",
+    "app-router",
+    "dependency-graph",
+    "visualization"
+  ],
   "type": "module",
   "bin": {
     "deadfall": "dist/cli.js"
   },
   "files": [
     "dist",
-    "README.md"
+    "README.md",
+    "LICENSE"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json && node scripts/build-client.mjs",

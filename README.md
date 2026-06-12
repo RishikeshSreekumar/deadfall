@@ -1,4 +1,4 @@
-# deadfall (`deadfall`)
+# deadfall
 
 Dev tool that maps a Next.js (App Router, TypeScript) codebase into a **component
 usage graph** to find **dead components** and **per-component usage** — rendered
@@ -7,19 +7,24 @@ project.
 
 ## Use
 
-```bash
-npm install
-npm run build
-npm link            # installs the `deadfall` command globally
+Run without installing:
 
+```bash
 # scan a target project, write the report
-deadfall /path/to/your/next-app --out report.html
+npx deadfall /path/to/your/next-app --out report.html
 
 # also emit the raw model for CI / scripting
-deadfall /path/to/your/next-app --out report.html --json report.json
+npx deadfall /path/to/your/next-app --out report.html --json report.json
 
 # count test/story files as real usage (off by default)
-deadfall /path/to/your/next-app --include-tests
+npx deadfall /path/to/your/next-app --include-tests
+```
+
+Or install globally and call `deadfall` directly:
+
+```bash
+npm install -g deadfall
+deadfall /path/to/your/next-app --out report.html
 ```
 
 ## Dead vs dead-in-prod
@@ -79,11 +84,19 @@ the default and the choice is remembered across reloads.
 - The `PascalCase + returns JSX` heuristic can mis-tag exotic factories /
   styled-component patterns.
 
-## Test
+## Contributing
 
 ```bash
+git clone https://github.com/RishikeshSreekumar/deadfall
+cd deadfall
+npm install
+npm run build
 npm test   # runs the engine against test/fixtures/app-router
 ```
 
 The fixture exercises every edge case: dead component, barrel re-export, dynamic
 import, and a test-only component.
+
+## License
+
+MIT — see [LICENSE](LICENSE).
