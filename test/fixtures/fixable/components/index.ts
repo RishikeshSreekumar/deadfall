@@ -1,0 +1,1 @@
+export { BarrelDead } from "./BarrelDead";

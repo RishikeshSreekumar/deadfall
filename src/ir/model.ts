@@ -49,6 +49,11 @@ export interface IRNode {
   kind: IRNodeKind;
   origin: IROrigin;
   isDefaultExport: boolean;
+  /**
+   * Marked intentionally-kept via a `deadfall-ignore` comment. The core adds
+   * ignored nodes to the prod reachability roots. Optional + additive.
+   */
+  ignored?: boolean;
   /** Adapter-only escape hatch (route path, "use server", selector, ...). */
   meta?: Record<string, unknown>;
 }
@@ -86,4 +91,11 @@ export interface GraphIR {
   roots: IRRoots;
   /** nodeId -> the JSX/usage sites where it is referenced. */
   usageSites: Record<string, UsageSite[]>;
+  /**
+   * file -> files it imports/re-exports (relative paths, discovered files
+   * only). Includes type-only, side-effect, and barrel re-export imports the
+   * symbol graph does not track — the safety backstop for `check --fix`.
+   * Optional + additive.
+   */
+  fileImports?: Record<string, string[]>;
 }

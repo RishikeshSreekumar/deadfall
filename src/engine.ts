@@ -1,13 +1,16 @@
+import path from "node:path";
 import { detectDeclarations } from "./scan/components.js";
 import { discoverFiles } from "./scan/discover.js";
+import { resolveModuleSpecifier } from "./scan/resolve.js";
 import { ComponentRegistry } from "./scan/registry.js";
 import { buildGraph } from "./graph/build.js";
 import { collectRoots } from "./graph/roots.js";
 import { classify } from "./graph/reachability.js";
 import { buildUsage } from "./analyze/usage.js";
+import { compileIgnorePatterns } from "./analyze/ignore-patterns.js";
 import { computeStructure } from "./analyze/structure.js";
 import { computeLayouts } from "./report/layouts.js";
-import { createProject, resolveConfig } from "./config.js";
+import { createProject, resolveConfig } from "./scan/ts-project.js";
 import { selectAdapter } from "./adapters/index.js";
 import type { FrameworkAdapter } from "./adapters/types.js";
 import type { GraphIR, IRNode } from "./ir/model.js";
@@ -79,6 +82,10 @@ export interface AnalyzeOptions {
   adapter?: FrameworkAdapter;
   /** Framework id (e.g. "next-app"); auto-detected from the project if omitted. */
   framework?: string;
+  /** Extra file ignore globs (merged with built-in + adapter ignores). */
+  ignore?: string[];
+  /** Component name patterns (`*`/`?` wildcards) kept alive as extra roots. */
+  ignoreComponents?: string[];
 }
 
 // ---------------------------------------------------------------------------
@@ -103,7 +110,7 @@ export async function extract(
 
   const files = await discoverFiles(config.root, {
     includeTests: options.includeTests,
-    extraIgnores: adapter.ignoreGlobs(),
+    extraIgnores: [...adapter.ignoreGlobs(), ...(options.ignore ?? [])],
   });
   log(`Found ${files.length} source files`);
 
@@ -139,11 +146,38 @@ export async function extract(
     kind: c.symbolKind,
     origin: c.kind,
     isDefaultExport: c.isDefaultExport,
+    ...(c.ignored ? { ignored: true } : {}),
   }));
 
   const usageSites: Record<string, UsageSite[]> = Object.fromEntries(
     graph.jsxSites
   );
+
+  // File-level import map (incl. type-only / side-effect / barrel re-exports
+  // that the symbol graph skips) — the `check --fix` safety backstop.
+  const discovered = new Set(sourceFiles.map((sf) => sf.getFilePath() as string));
+  const toRel = (abs: string) =>
+    path.relative(config.root, abs).split(path.sep).join("/");
+  const fileImports: Record<string, string[]> = {};
+  for (const sf of sourceFiles) {
+    const targets = new Set<string>();
+    const specs = [
+      ...sf.getImportDeclarations().map((d) => d.getModuleSpecifierValue()),
+      ...sf
+        .getExportDeclarations()
+        .map((d) => d.getModuleSpecifierValue())
+        .filter((s): s is string => s !== undefined),
+    ];
+    for (const spec of specs) {
+      const target = resolveModuleSpecifier(project, sf.getFilePath(), spec);
+      if (!target) continue;
+      const absTarget = target.getFilePath() as string;
+      if (discovered.has(absTarget) && absTarget !== sf.getFilePath()) {
+        targets.add(toRel(absTarget));
+      }
+    }
+    if (targets.size) fileImports[toRel(sf.getFilePath())] = [...targets].sort();
+  }
 
   return {
     schemaVersion: 1,
@@ -153,6 +187,7 @@ export async function extract(
     edges: graph.edges,
     roots: { prod: [...prodRoots], test: [...testRoots] },
     usageSites,
+    fileImports,
   };
 }
 
@@ -167,7 +202,7 @@ export async function extract(
 /** Enrich a GraphIR into the full ReportModel consumed by the visualizer. */
 export function analyzeIR(
   ir: GraphIR,
-  options: Pick<AnalyzeOptions, "onProgress"> = {}
+  options: Pick<AnalyzeOptions, "onProgress" | "ignoreComponents"> = {}
 ): ReportModel {
   const log = options.onProgress ?? (() => {});
 
@@ -176,6 +211,21 @@ export function analyzeIR(
   const reportNodes = ir.nodes.filter((n) => REPORTED_KINDS.has(n.kind));
   const prodRoots = new Set(ir.roots.prod);
   const testRoots = new Set(ir.roots.test);
+
+  // Intentionally-kept components (`deadfall-ignore` directive or an
+  // ignoreComponents pattern) become extra prod roots: they and everything
+  // they render count as alive.
+  const matchesIgnorePattern = compileIgnorePatterns(
+    options.ignoreComponents ?? []
+  );
+  const ignoredIds = new Set<string>();
+  for (const n of reportNodes) {
+    if (n.ignored || matchesIgnorePattern(n)) {
+      ignoredIds.add(n.id);
+      prodRoots.add(n.id);
+    }
+  }
+  if (ignoredIds.size) log(`Ignoring ${ignoredIds.size} components (kept alive)`);
 
   const states = classify(reportNodes, ir.edges, prodRoots, testRoots);
   const usage = buildUsage(reportNodes, ir.usageSites, states);
@@ -188,6 +238,7 @@ export function analyzeIR(
     symbolKind: c.kind as ComponentNode["symbolKind"],
     isDefaultExport: c.isDefaultExport,
     line: c.line,
+    ...(ignoredIds.has(c.id) ? { ignored: true } : {}),
   }));
 
   // The raw graph has edges through unreported `module` glue (config objects,
@@ -225,6 +276,7 @@ export function analyzeIR(
       totalComponents: components.length,
       dead,
       deadInProd,
+      ...(ignoredIds.size ? { ignored: ignoredIds.size } : {}),
     },
   };
 }

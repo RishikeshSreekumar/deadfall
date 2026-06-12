@@ -19,6 +19,8 @@ export interface ComponentNode {
   symbolKind: SymbolKind;
   isDefaultExport: boolean;
   line: number;
+  /** Kept alive on purpose (deadfall-ignore directive or ignore pattern). */
+  ignored?: boolean;
 }
 
 /** A directed "A renders/references B" edge between two components. */
@@ -141,5 +143,7 @@ export interface ReportModel {
     totalComponents: number;
     dead: number;
     deadInProd: number;
+    /** Components kept alive via deadfall-ignore directives / patterns. */
+    ignored?: number;
   };
 }

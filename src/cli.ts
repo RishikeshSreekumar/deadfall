@@ -1,62 +1,58 @@
 #!/usr/bin/env node
-import { writeFileSync } from "node:fs";
-import path from "node:path";
 import { Command } from "commander";
-import { analyze } from "./engine.js";
 import { adapterNames } from "./adapters/index.js";
+import { runReport } from "./commands/report.js";
+import { runCheck } from "./commands/check.js";
+import { reporterNames } from "./check/reporters/index.js";
 
 const program = new Command();
 
 program
   .name("deadfall")
-  .description("Map React/Next.js component usage and dead components.")
-  .argument("<project>", "path to the target project")
+  .description("Map React/Next.js component usage and dead components.");
+
+const frameworkHelp = `framework adapter (auto-detected if omitted): ${adapterNames().join(", ")}`;
+const collect = (value: string, previous: string[]) => [...previous, value];
+
+program
+  .command("check [project]")
+  .description("list dead components and exit non-zero when any are found")
+  .option(
+    "--reporter <name>",
+    `output format: ${reporterNames().join(", ")}`,
+    "compact"
+  )
+  .option("--max-dead <n>", "tolerate up to <n> issues before failing")
+  .option("--ignore <glob>", "extra file ignore glob (repeatable)", collect, [])
+  .option(
+    "--ignore-components <pattern>",
+    "component name pattern to keep alive (repeatable, * and ? wildcards)",
+    collect,
+    []
+  )
+  .option("--baseline <file>", "only fail on issues not present in this baseline")
+  .option("--update-baseline", "write the current issues to the baseline file and exit")
+  .option("--fix", "delete files whose every declaration is dead (needs a clean git tree)")
+  .option("--fix-dry-run", "show what --fix would delete without deleting")
+  .option("--allow-dirty", "let --fix run without a clean git tree")
+  .option("-c, --config <path>", "explicit config file path")
+  .option("-f, --framework <id>", frameworkHelp)
+  .option("--include-tests", "count usage in test/story files (off by default)")
+  .action(runCheck);
+
+program
+  .command("report [project]", { isDefault: true })
+  .description("write the interactive HTML report (default command)")
   .option("-o, --out <file>", "output HTML report path", "deadfall.html")
   .option("-j, --json <file>", "also write the raw ReportModel JSON")
   .option("-r, --report <file>", "also write a Markdown structure report")
-  .option(
-    "-f, --framework <id>",
-    `framework adapter (auto-detected if omitted): ${adapterNames().join(", ")}`
-  )
-  .option("--include-tests", "count usage in test/story files (off by default)", false)
-  .action(async (project: string, opts) => {
-    const { renderHtml } = await import("./report/html.js");
-    const model = await analyze(project, {
-      includeTests: Boolean(opts.includeTests),
-      framework: opts.framework,
-      onProgress: (m) => console.error(`• ${m}`),
-    });
-
-    const outPath = path.resolve(opts.out);
-    writeFileSync(outPath, renderHtml(model), "utf8");
-
-    if (opts.json) {
-      writeFileSync(path.resolve(opts.json), JSON.stringify(model, null, 2), "utf8");
-    }
-
-    let reportPath: string | undefined;
-    if (opts.report) {
-      const { toStructureMarkdown } = await import("./report/structure-report.js");
-      reportPath = path.resolve(opts.report);
-      writeFileSync(reportPath, toStructureMarkdown(model), "utf8");
-    }
-
-    const { totalComponents, dead, deadInProd } = model.stats;
-    const { hubs, cycles, suggestedMoves, crossDirEdges } = model.structure;
-    console.error("");
-    console.error(`  components       ${totalComponents}`);
-    console.error(`  dead             ${dead}`);
-    console.error(`  dead-in-prod     ${deadInProd}`);
-    console.error(`  hubs             ${hubs.length}`);
-    console.error(`  cycles           ${cycles.length}`);
-    console.error(`  move hints       ${suggestedMoves.length}`);
-    console.error(`  cross-dir edges  ${crossDirEdges}`);
-    console.error("");
-    console.error(`  report → ${outPath}`);
-    if (reportPath) console.error(`  structure → ${reportPath}`);
-  });
+  .option("--ignore <glob>", "extra file ignore glob (repeatable)", collect, [])
+  .option("-c, --config <path>", "explicit config file path")
+  .option("-f, --framework <id>", frameworkHelp)
+  .option("--include-tests", "count usage in test/story files (off by default)")
+  .action(runReport);
 
 program.parseAsync().catch((err) => {
   console.error(err instanceof Error ? err.message : err);
-  process.exit(1);
+  process.exit(2);
 });

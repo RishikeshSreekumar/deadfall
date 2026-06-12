@@ -1,0 +1,8 @@
+{
+  "name": "pkg-fixture",
+  "private": true,
+  "deadfall": {
+    "project": "./src",
+    "maxDead": 1
+  }
+}

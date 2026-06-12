@@ -12,6 +12,7 @@ import type {
   ComponentNode,
   SymbolKind,
 } from "../report/model.js";
+import { hasIgnoreDirective } from "./directives.js";
 
 /**
  * A tracked top-level declaration. Classified by `symbolKind`:
@@ -26,6 +27,8 @@ export interface ComponentInfo extends Omit<ComponentNode, "symbolKind"> {
   symbolKind: GlueSymbolKind;
   /** True for actual React components; false for everything else. */
   isComponent: boolean;
+  /** Marked with a `deadfall-ignore` comment: kept alive on purpose. */
+  ignored?: boolean;
 }
 
 /** `SymbolKind` plus the internal-only `module` glue classification. */
@@ -126,6 +129,7 @@ function makeNode(
     decl,
     symbolKind,
     isComponent: symbolKind === "component",
+    ignored: hasIgnoreDirective(decl) || undefined,
   };
 }
 

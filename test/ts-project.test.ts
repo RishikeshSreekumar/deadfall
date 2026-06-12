@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { mkdtempSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { resolveConfig, createProject } from "../src/config.js";
+import { resolveConfig, createProject } from "../src/scan/ts-project.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const appRouter = path.join(here, "fixtures", "app-router");

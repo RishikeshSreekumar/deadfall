@@ -1,0 +1,8 @@
+{
+  "project": "../../app-router",
+  "maxDead": 3,
+  "ignore": ["**/legacy/**"],
+  "ignoreComponents": ["*Icon"],
+  "reporter": "compact",
+  "includeTests": true
+}

@@ -1,6 +1,6 @@
 {
   "name": "deadfall",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Dev tool to map React/Next.js component usage and dead components as a static graph.",
   "license": "MIT",
   "author": "Rishikesh S",

@@ -1,88 +1,217 @@
 # deadfall
 
-Dev tool that maps a Next.js (App Router, TypeScript) codebase into a **component
-usage graph** to find **dead components** and **per-component usage** — rendered
-as a single static HTML file. No server, no UI to build, no changes to the target
-project.
+Find the dead React components in your Next.js app — and prove it before you
+delete them.
 
-## Use
+deadfall maps your codebase (App Router, TypeScript) into a component usage
+graph, then tells you which components nothing actually renders. Use it from
+the terminal as a CI gate, or open the interactive HTML report to explore your
+component architecture. It never modifies your project unless you explicitly
+ask it to (`--fix`), and it needs no server, no build step, and no changes to
+your code.
 
-Run without installing:
+## Quick start
 
 ```bash
-# scan a target project, write the report
-npx deadfall /path/to/your/next-app --out report.html
-
-# also emit the raw model for CI / scripting
-npx deadfall /path/to/your/next-app --out report.html --json report.json
-
-# count test/story files as real usage (off by default)
-npx deadfall /path/to/your/next-app --include-tests
+# see your dead components right now
+npx deadfall check /path/to/your/next-app
 ```
 
-Or install globally and call `deadfall` directly:
+```
+dead (5)
+  components/GhostIcon.tsx:3 GhostIcon
+  components/OnlyTested.tsx:2 OnlyTested
+  components/OrphanChild.tsx:2 OrphanChild
+  ...
+
+15 components, 5 dead
+```
+
+Exit code is `1` when anything is dead, so the same command works as a CI
+gate. Prefer a picture? Generate the interactive report instead:
+
+```bash
+npx deadfall report /path/to/your/next-app --out report.html
+```
+
+Install globally if you use it often:
 
 ```bash
 npm install -g deadfall
-deadfall /path/to/your/next-app --out report.html
 ```
 
-## Dead vs dead-in-prod
+## The two commands
 
-A component is **used** only if it is reachable from an application entry point
-(App Router `page`/`layout`/etc., or a `dynamic()` import). Reachability is
-transitive: a component rendered only by a dead component is itself **dead**.
+| Command | What you get |
+|---------|--------------|
+| `deadfall check <project>` | terminal listing of dead components + CI-friendly exit codes |
+| `deadfall report <project>` | self-contained interactive HTML graph of every component |
 
-- **dead** — reachable from no app entry point. Safe-to-delete candidate.
-- **dead-in-prod** — dead in shipped code, but a test or story renders it. Only
-  appears with `--include-tests`; deleting it means also updating that test/story.
+`report` is the default, so plain `deadfall <project>` works too.
 
-By default `*.test.*`, `*.spec.*`, `*.stories.*`, `__tests__/`, and `__mocks__/`
-are **excluded** — usage inside them does not count, so a component used only by
-tests/stories is reported as plain `dead`. Pass `--include-tests` to include them
-(and surface the `dead-in-prod` distinction).
+> Edge case: a project directory literally named `check` or `report` is parsed
+> as the subcommand — disambiguate with `deadfall report ./check`.
 
-Open `report.html` in a browser — it opens instantly (layout is precomputed
-offline, so there is no in-browser physics). The graph is a **directory-clustered
-point cloud**: nodes = components grouped spatially by source directory (size ∝
-prod usage; color: blue=used, red=dead, amber=dead-in-prod). Edges = "renders"
-(dashed = dynamic import, dotted = value reference) and are hidden in the overview
-to keep it readable.
+## Using `check`
 
-**Navigate** from the left rail: search by name or browse the collapsible
-directory tree (each folder shows its dead count). Click a component —
-in the tree or the graph — to enter **focus mode**: the view zooms to that node's
-neighborhood with everything else dimmed, so you never face all the edges at
-once. The neighborhood is **multi-level and directional** — pick a **depth**
-(1–5, default 2) and a **direction**: `dependents ↑` (what renders this,
-transitively), `dependencies ↓` (what this renders), or `both`. Raising the
-depth walks the chain another level — the components that use the ones that use
-the selected one, and so on. The breadcrumb's "Overview" (or **Reset view** /
-clicking empty space) returns to the full graph. The right panel shows file path
-and usage sites. Filter the rail by dead / dead-in-prod.
+### Pick your output format
 
-The report ships with a **light/dark toggle** (🌙/☀︎ in the top bar); light is
-the default and the choice is remembered across reloads.
+```bash
+deadfall check ./app                      # human-readable (default)
+deadfall check ./app --reporter json      # machine-readable, pipe to jq
+deadfall check ./app --reporter markdown  # paste into a PR comment
+deadfall check ./app --reporter github    # GitHub Actions annotations
+```
 
-## How it works
+Progress messages go to stderr, results to stdout — so
+`deadfall check ./app --reporter json | jq '.dead[].file'` just works.
 
-| Stage | File | Notes |
-|-------|------|-------|
-| Discover files | `src/scan/discover.ts` | globs `.tsx/.jsx/.ts/.js`, respects `.gitignore`, skips `node_modules`/`.next`/`dist` |
-| Detect components | `src/scan/components.ts` | exported PascalCase decls that return JSX or are `forwardRef`/`memo`/`dynamic`/`styled`-wrapped |
-| Resolve & graph | `src/scan/resolve.ts`, `src/graph/build.ts` | TS checker (`getAliasedSymbol`) follows imports, tsconfig `paths`, and barrel re-exports to the real definition |
-| Roots & dead | `src/graph/roots.ts`, `src/graph/reachability.ts` | App Router entry files + dynamic-import targets are roots; unreachable (transitively) = dead; with `--include-tests`, test/story-only = dead-in-prod |
-| Usage | `src/analyze/usage.ts` | JSX site counts, split prod vs test/story |
-| Report | `src/report/html.ts` | self-contained HTML + cytoscape |
+### Gate your CI
+
+```bash
+deadfall check ./app               # fails the build if anything is dead
+deadfall check ./app --max-dead 5  # tolerate up to 5 issues
+```
+
+Exit codes:
+
+| Code | Meaning |
+|------|---------|
+| 0 | clean (or within `--max-dead`, or all issues baselined) |
+| 1 | dead components found |
+| 2 | something went wrong (bad flag, missing path, invalid config) |
+
+### Adopting on an existing codebase? Use a baseline
+
+Don't fix 200 components before you can turn the check on. Snapshot today's
+debt and only fail on *new* dead components:
+
+```bash
+# once: record the current state
+deadfall check ./app --baseline deadfall-baseline.json --update-baseline
+
+# in CI: only newly-dead components fail
+deadfall check ./app --baseline deadfall-baseline.json
+```
+
+Commit the baseline file. Delete entries (or re-run `--update-baseline`) as
+you pay the debt down. Baseline entries are keyed by `path#ComponentName`, so
+moving or renaming a file re-flags its components — the baseline never
+silently grows.
+
+### Keep components on purpose
+
+Not everything unreferenced is garbage — design-system exports, components
+looked up via string registries, things you're about to wire up. Three ways to
+tell deadfall to leave them alone:
+
+```tsx
+// deadfall-ignore: public API of the design system
+export const Button = () => <button />;
+```
+
+```bash
+deadfall check ./app --ignore-components '*Icon'    # by name pattern
+deadfall check ./app --ignore '**/legacy/**'        # skip files entirely
+```
+
+An ignored component counts as *alive*, and so does everything it renders — so
+ignoring a wrapper never leaves its children falsely flagged.
+
+### Let deadfall delete for you (`--fix`)
+
+```bash
+deadfall check ./app --fix-dry-run   # show what would be deleted, touch nothing
+deadfall check ./app --fix           # delete (requires a clean git tree)
+```
+
+`--fix` is deliberately conservative. It deletes **whole files only**, and only
+when every declaration in the file is dead, nothing in it is ignored, and no
+other file imports it at all — including barrel re-exports, type-only imports,
+and side-effect imports. Everything else is listed as skipped with the reason,
+for you to clean up by hand. It refuses to run on a dirty (or absent) git tree
+unless you pass `--allow-dirty`, so every deletion is one `git checkout` away
+from undo.
+
+## Using `report`
+
+```bash
+deadfall report ./app -o report.html              # the interactive graph
+deadfall report ./app -o report.html -j model.json -r structure.md
+```
+
+Open `report.html` in any browser — it's fully self-contained and opens
+instantly (layout is precomputed, no in-browser physics). You get:
+
+- a **directory-clustered map** of every component — size ∝ usage; blue =
+  used, red = dead, amber = dead-in-prod
+- **search + directory tree** with per-folder dead counts
+- **focus mode** — click any component to see what renders it and what it
+  renders, transitively, with depth and direction controls
+- **architecture insights** — hubs, dependency cycles, cohesion clusters, and
+  "this component probably belongs in that directory" hints
+- a light/dark toggle that remembers your choice
+
+`-j model.json` dumps the raw analysis for your own scripting; `-r structure.md`
+writes a Markdown architecture summary that's handy as a CI artifact.
+
+## Configuration file
+
+Both commands read an optional config so your CI scripts stay short. Lookup
+order (first hit wins): `--config <path>` → `deadfall.json` →
+`deadfall.config.json` → a `"deadfall"` key in `package.json`. CLI flags beat
+config values; list options (`ignore`, `ignoreComponents`) combine.
+
+```jsonc
+{
+  "project": "./",                      // analyzed path, relative to the config file
+  "framework": "next-app",
+  "includeTests": false,
+  "ignore": ["**/legacy/**"],           // extra file ignore globs
+  "ignoreComponents": ["*Icon"],        // component name patterns to keep
+  "maxDead": 0,                          // check: issue tolerance
+  "reporter": "compact",                 // check: default reporter
+  "baseline": "deadfall-baseline.json",  // check: default baseline file
+  "out": "deadfall.html",                // report: HTML path
+  "json": "model.json",                  // report: raw model path
+  "report": "structure.md"               // report: Markdown structure path
+}
+```
+
+With `project` set, `deadfall check` with no arguments just works.
+
+## What counts as dead?
+
+A component is **used** only if it's reachable from an application entry point
+(an App Router `page`/`layout`/etc., or a `dynamic()` import). Reachability is
+transitive: a component rendered only by a dead component is itself dead.
+
+- **dead** — no entry point reaches it. Safe-to-delete candidate.
+- **dead-in-prod** — dead in shipped code, but a test or story renders it.
+  Only appears with `--include-tests`; deleting it means updating that test too.
+
+By default `*.test.*`, `*.spec.*`, `*.stories.*`, `__tests__/`, and
+`__mocks__/` are excluded — a component used only by tests is reported as
+plain `dead`. Pass `--include-tests` to count them and surface the
+`dead-in-prod` distinction.
+
+Under the hood, deadfall uses the TypeScript compiler to resolve every JSX tag
+to its real definition — through `tsconfig` path aliases, barrel re-exports,
+and `dynamic()`/`lazy()` imports — so the graph reflects what actually renders,
+not a text search.
 
 ## Known limits
 
-- **Dynamic/indirect usage** beyond `dynamic()`/`lazy()` (string registries,
-  HOCs, components passed as values) is approximated by a soft "reference" edge;
-  spot-check flagged-dead components before deleting.
-- **`next.config` references** are out of scope.
-- The `PascalCase + returns JSX` heuristic can mis-tag exotic factories /
+- Dynamic or indirect usage beyond `dynamic()`/`lazy()` (string registries,
+  HOCs, components passed around as values) is approximated by a soft
+  "reference" edge — spot-check flagged components before deleting, or mark
+  them `// deadfall-ignore`.
+- `next.config` references are out of scope.
+- The `PascalCase + returns JSX` heuristic can mis-tag exotic factories or
   styled-component patterns.
+
+`--fix` is built so these limits can't hurt you: any import at all — even one
+the component graph missed — blocks deletion.
 
 ## Contributing
 
@@ -91,11 +220,11 @@ git clone https://github.com/RishikeshSreekumar/deadfall
 cd deadfall
 npm install
 npm run build
-npm test   # runs the engine against test/fixtures/app-router
+npm test
 ```
 
-The fixture exercises every edge case: dead component, barrel re-export, dynamic
-import, and a test-only component.
+The test fixtures exercise every edge case: dead components, barrel re-exports,
+dynamic imports, ignore directives, baselines, and `--fix` safety rules.
 
 ## License
 
