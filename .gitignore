@@ -1,0 +1,7 @@
+node_modules/
+dist/
+*.html
+*.log
+
+# Source report assets are tracked (only generated *.html reports are ignored).
+!src/report/template.html

@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>deadfall</title>
+<script>{{CYTOSCAPE}}</script>
+<style>
+{{STYLES}}</style>
+</head>
+<body>
+<div id="bar">
+  <b>deadfall</b>
+  <span class="stat">total <span id="s-total"></span></span>
+  <span class="stat dead">dead <span id="s-dead"></span></span>
+  <span class="stat dip">dead-in-prod <span id="s-dip"></span></span>
+  <div class="sep"></div>
+  <label class="stat">layout
+    <select id="layout"><!-- options injected from LAYOUT_MODES --></select>
+  </label>
+  <label class="stat">color
+    <select id="color"><!-- options injected from COLOR_ENCODINGS --></select>
+  </label>
+  <label class="stat">size
+    <select id="size"><!-- options injected from SIZE_ENCODINGS --></select>
+  </label>
+  <label class="stat">depth
+    <select id="depth">
+      <option value="1">1</option><option value="2" selected>2</option>
+      <option value="3">3</option><option value="4">4</option><option value="5">5</option>
+    </select>
+  </label>
+  <label class="stat">direction
+    <select id="dir">
+      <option value="both">both</option>
+      <option value="dependents">dependents ↑</option>
+      <option value="dependencies">dependencies ↓</option>
+    </select>
+  </label>
+  <label class="stat"><input type="checkbox" id="edgesToggle" /> edges</label>
+  <button id="reset">Reset view</button>
+  <button id="theme" title="toggle light/dark">🌙</button>
+  <span class="legend" id="legend"></span>
+</div>
+<div id="crumbs"><span class="cur">Overview — click a node or a component to focus</span></div>
+<div id="main">
+  <div id="nav">
+    <div class="controls">
+      <div class="tabs">
+        <button id="tab-tree" class="on">Tree</button>
+        <button id="tab-insights">Insights</button>
+      </div>
+      <input id="search" placeholder="search component…" autocomplete="off" />
+      <select id="filter">
+        <option value="all">all components</option>
+        <option value="dead">dead only</option>
+        <option value="dead-in-prod">dead-in-prod</option>
+      </select>
+    </div>
+    <div id="navhint"></div>
+    <div id="tree"></div>
+    <div id="insights"></div>
+  </div>
+  <div id="cywrap">
+    <div id="cy"></div>
+    <div id="tip"></div>
+    <div id="zoom">
+      <button id="zin" title="zoom in">+</button>
+      <button id="zout" title="zoom out">−</button>
+      <button id="zfit" title="fit">⤢</button>
+    </div>
+  </div>
+  <div id="panel"><span class="muted">Click a node to inspect it.</span></div>
+</div>
+<script>const MODEL = {{MODEL}};</script>
+<script>{{CLIENT}}</script>
+</body>
+</html>
