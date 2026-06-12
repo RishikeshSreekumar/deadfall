@@ -366,26 +366,37 @@ In the browser, cytoscape renders the graph using its `preset` layout — it jus
 places each node at the precomputed coordinates, so there is no simulation and
 the file opens immediately. The client provides:
 
-- The **directory-clustered point cloud** itself: each node is a component,
-  sized by prod usage and colored by state (blue = used, red = dead, amber =
-  dead-in-prod). Edges ("renders") are dashed for dynamic imports and dotted for
-  value references, and are hidden in the overview to keep a large graph
-  readable.
-- A **left rail** to navigate: search by name, or browse a collapsible directory
-  tree where each folder shows its dead count, plus filters for dead /
-  dead-in-prod.
-- **Focus mode**: click a component (in the tree or the graph) and the view
-  zooms to that node's neighborhood with everything else dimmed, so you never
-  face every edge at once. The neighborhood is **multi-level and directional** —
-  choose a depth (1–5, default 2) and a direction: `dependents ↑` (what renders
-  this, transitively), `dependencies ↓` (what this renders), or `both`. Raising
-  the depth walks another level up or down the chain.
-- A **right panel** showing the selected component's file path and its usage
-  sites.
-- Switchable **layout modes** (directory / layers / clusters) and color/size
-  encodings (state / role / cluster; usage / fan-in / fan-out).
-- An **Insights panel** surfacing the hubs, dependency cycles, and move hints
-  computed in the analyze layer.
+- A **Triage panel** as the landing tab: dead-in-prod findings, dead components
+  ranked by deletion payoff (the size of each one's deletion cascade), plus the
+  hubs, dependency cycles, and move hints computed in the analyze layer. Every
+  row focuses the graph. A **Tree** tab holds the collapsible directory tree
+  with per-folder dead counts.
+- **Named view presets** (Triage / Architecture / Hotspots / Modules) in the
+  top bar, each bundling a layout mode (directory / layers / clusters),
+  color/size encodings (state / role / cluster; usage / fan-in / fan-out), and
+  edge defaults. The raw knobs live under a ⚙ disclosure; touching one detaches
+  the view to "custom".
+- **Semantic zoom**: above ~200 components the overview opens as one bubble per
+  directory — sized by member count, with a red pie slice for the dead share —
+  and aggregated, weighted dir→dir edges. Clicking a bubble expands that
+  directory into its components; the full point cloud is one toggle away.
+- The **component point cloud** itself: each node sized/colored by the active
+  encoding (blue = used, red = dead, amber = dead-in-prod). Edges ("renders")
+  are dashed for dynamic imports and dotted for value references, and default
+  off on large overviews to keep them readable.
+- **Focus mode**: click a component (anywhere) and the view zooms to that
+  node's neighborhood with everything else dimmed. The neighborhood is
+  **multi-level and directional** — depth starts at 1 and grows via the
+  breadcrumb's `+ depth` button (or the advanced depth knob, 1–5), with a
+  direction choice: `dependents ↑`, `dependencies ↓`, or `both`.
+- A **right inspector** showing the selected component's file path and usage
+  sites as open-in-editor (`vscode://`) links, fan-in/out, dependents and
+  dependencies — and, for dead components, the **deletion cascade**: the full
+  set that becomes deletable together with it (greatest-fixpoint over the
+  dependency graph, so mutually-referencing dead components fall together).
+- **Fuzzy search** with a keyboard-navigable result palette (↑↓ Enter), a
+  **clickable legend** that doubles as the dead/dead-in-prod filter, and a
+  **shareable URL hash** encoding the active view and focused component.
 - A **light/dark toggle**, defaulting to light and remembered across reloads.
 
 Returning to "Overview" (via the breadcrumb, a Reset action, or clicking empty

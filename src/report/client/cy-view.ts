@@ -1,13 +1,14 @@
 // The cytoscape view: sole owner of the graph instance and every operation that
-// touches it (encoding, layout switching, focus/ego, filtering, search
-// highlight, theme, zoom, tooltip). Pure graph logic lives in ./graph and
-// ./encodings; this module maps it onto cytoscape elements and the DOM.
+// touches it (encoding, presets, layout switching, semantic zoom, focus/ego,
+// filtering, search highlight, theme, zoom, tooltip). Pure graph logic lives in
+// ./graph and ./encodings; this module maps it onto cytoscape elements and DOM.
 
 import type { NodePosition } from "../model.js";
 import { model, compById, usageById, metricById, layouts, adjacency } from "./context.js";
-import { buildNodes, buildAllLabels, buildEdges } from "./elements.js";
+import { buildNodes, buildAllLabels, buildEdges, buildDirElements } from "./elements.js";
 import { nodeColor, nodeSize, legendHtml } from "./encodings.js";
 import { ego, edgeKey } from "./graph/ego.js";
+import type { ViewPreset } from "./presets.js";
 import { byId, cssVar, esc } from "./dom.js";
 import { getState, setState } from "./state.js";
 import {
@@ -19,24 +20,34 @@ import {
   ANIM_ZOOM_MS,
   ANIM_FIT_MS,
   ZOOM_STEP,
+  MAX_FOCUS_DEPTH,
   TIP_OFFSET,
   TIP_WIDTH,
   TIP_FLIP_MARGIN,
   LOD_NODE_THRESHOLD,
   LABEL_MIN_ZOOM_FONT,
   LABEL_MIN_ZOOM_FONT_LARGE,
+  DIR_OVERVIEW_THRESHOLD,
+  EDGE_AUTO_MAX,
+  STATE_COLORS,
 } from "./constants.js";
-import { showInspector, setPanelHtml, setActiveTab, setCrumbs } from "./panels.js";
+import { showInspector, showDirPanel, setPanelHtml, setCrumbs } from "./panels.js";
 
 declare const cytoscape: any;
 
 let cy: any = null;
 let basePos: Record<string, NodePosition> = {};
 const edgesByKey = new Map<string, any>(); // edgeKey -> cytoscape edge collection
+/** Directories whose bubbles have been expanded into their components. */
+const expandedDirs = new Set<string>();
 const cyEl = () => byId("cy");
 
 function visibleNodes(): any {
   return cy.nodes().filter((n: any) => n.style("display") !== "none");
+}
+
+function filterValue(): string {
+  return byId<HTMLSelectElement>("filter").value;
 }
 
 // ---- init ----
@@ -49,6 +60,7 @@ export function initView(): void {
   const nodeIds = new Set<string>(nodes.map((n) => n.data.id as string));
   const labels = buildAllLabels(layouts);
   const edges = buildEdges(nodeIds);
+  const dirEls = buildDirElements(basePos);
 
   // Level-of-detail: on large graphs only reveal node labels when zoomed in far
   // enough, so thousands of labels don't repaint on every pan/zoom.
@@ -57,7 +69,7 @@ export function initView(): void {
 
   cy = cytoscape({
     container: el,
-    elements: { nodes: nodes.concat(labels), edges },
+    elements: { nodes: nodes.concat(labels, dirEls.nodes), edges: edges.concat(dirEls.edges) },
     style: [
       { selector: 'node[type="comp"]', style: {
         "background-color": "data(color)", width: "data(size)", height: "data(size)",
@@ -70,6 +82,18 @@ export function initView(): void {
         label: "data(label)", "font-size": 13, color: cssVar("--graph-label"),
         "text-valign": "top", "text-halign": "right", "text-margin-x": 4,
         "min-zoomed-font-size": 6, "border-width": 0 } },
+      // Directory bubbles for the semantic-zoom overview: pie slice = dead share.
+      { selector: 'node[type="dir"]', style: {
+        width: "data(size)", height: "data(size)", shape: "ellipse",
+        "background-color": STATE_COLORS.used, "background-opacity": 0.25,
+        "border-width": 1.5, "border-color": STATE_COLORS.used, "border-opacity": 0.7,
+        "pie-size": "78%",
+        "pie-1-background-color": STATE_COLORS.dead, "pie-1-background-size": "data(deadPct)",
+        "pie-1-background-opacity": 0.9,
+        "pie-2-background-color": STATE_COLORS.used, "pie-2-background-size": "data(alivePct)",
+        "pie-2-background-opacity": 0.35,
+        label: "data(label)", "font-size": 12, color: cssVar("--node-label"),
+        "text-valign": "bottom", "text-margin-y": 4, "min-zoomed-font-size": 6 } },
       { selector: "node.hidden", style: { display: "none" } },
       { selector: "node.faded", style: { opacity: 0.1, "text-opacity": 0 } },
       { selector: "node.hi", style: { "border-width": 4, "border-color": cssVar("--hi-border"), "border-opacity": 1 } },
@@ -85,6 +109,13 @@ export function initView(): void {
       { selector: 'edge.show[kind="dynamic"]', style: { "line-style": "dashed", "line-color": "#388bfd", "target-arrow-color": "#388bfd" } },
       { selector: 'edge.show[kind="reference"]', style: { "line-style": "dotted" } },
       { selector: "edge.cyc", style: { display: "element", "line-color": "#f85149", "target-arrow-color": "#f85149", opacity: 1, width: 2 } },
+      // Aggregated dir→dir links (drawn when the edges toggle is on; cytoscape
+      // hides them whenever an endpoint bubble is hidden), width = edge count.
+      { selector: "edge.diredge", style: {
+        display: "none", width: "data(width)", "line-color": "#6e7681", opacity: 0.45,
+        "target-arrow-color": "#6e7681", "target-arrow-shape": "triangle",
+        "curve-style": "bezier", "arrow-scale": 0.7 } },
+      { selector: "edge.diredge.show", style: { display: "element" } },
     ],
     layout:
       basePos && Object.keys(basePos).length
@@ -101,8 +132,9 @@ export function initView(): void {
     pixelRatio: 1,
   });
 
-  // Index edges by directional key so the pure ego result maps back to elements.
-  cy.edges().forEach((e: any) => {
+  // Index component edges by directional key so the pure ego result maps back
+  // to elements (aggregated dir links are not part of the ego graph).
+  cy.edges().not(".diredge").forEach((e: any) => {
     const k = edgeKey(e.data("source"), e.data("target"));
     const existing = edgesByKey.get(k);
     edgesByKey.set(k, existing ? existing.union(e) : e);
@@ -110,6 +142,55 @@ export function initView(): void {
 
   wireGraphEvents();
   wireTooltip();
+  // Debug/console handle (also used by automated checks of the report).
+  (window as unknown as Record<string, unknown>).__deadfallCy = cy;
+}
+
+// ---- presets ----
+
+/** Resolve an "auto" overview level by graph size. */
+function resolveOverview(p: ViewPreset): "dirs" | "comps" {
+  if (p.overview === "auto")
+    return model.components.length > DIR_OVERVIEW_THRESHOLD ? "dirs" : "comps";
+  return p.overview;
+}
+
+function resolveEdges(p: ViewPreset): boolean {
+  if (p.edges === "on") return true;
+  if (p.edges === "off") return false;
+  return model.components.length <= EDGE_AUTO_MAX;
+}
+
+/** Activate a named view: bundles layout, encodings, filter, edges, overview. */
+export function applyPreset(p: ViewPreset): void {
+  setState({
+    preset: p.id,
+    layoutMode: p.layoutMode,
+    colorMode: p.colorMode,
+    sizeMode: p.sizeMode,
+    overviewLevel: resolveOverview(p),
+  });
+  byId<HTMLSelectElement>("filter").value = p.filter;
+  basePos = (layouts && (layouts as Record<string, Record<string, NodePosition>>)[p.layoutMode]) || basePos;
+  cy.batch(() => {
+    restoreBase();
+    showLabelsFor(p.layoutMode);
+  });
+  byId<HTMLInputElement>("edgesToggle").checked = resolveEdges(p);
+  applyEncoding();
+  resetView();
+}
+
+/** Switch the overview between directory bubbles and all components. */
+export function setOverviewLevel(level: "dirs" | "comps"): void {
+  setState({ overviewLevel: level });
+  resetView();
+}
+
+/** True when the current overview shows directory bubbles. */
+export function dirsOverviewActive(): boolean {
+  const s = getState();
+  return s.overviewLevel === "dirs" && s.layoutMode === "directory" && filterValue() === "all";
 }
 
 // ---- encoding ----
@@ -132,7 +213,7 @@ export function renderLegend(): void {
   byId("legend").innerHTML = legendHtml(getState().colorMode);
 }
 
-// ---- layout switching ----
+// ---- layout switching (advanced knob; marks the view "custom") ----
 
 export function showLabelsFor(mode: string): void {
   cy.nodes('[type="label"]').forEach((n: any) => {
@@ -140,22 +221,15 @@ export function showLabelsFor(mode: string): void {
   });
 }
 
-function defaultEdgesShown(): boolean {
-  return getState().layoutMode !== "directory";
-}
-
 export function setLayout(mode: string): void {
   if (!layouts || !(layouts as Record<string, unknown>)[mode]) return;
-  setState({ layoutMode: mode as never });
+  setState({ layoutMode: mode as never, preset: "custom" });
   basePos = (layouts as Record<string, Record<string, NodePosition>>)[mode];
   cy.batch(() => {
-    cy.nodes('[type="comp"]').forEach((n: any) => {
-      const p = basePos[n.id()];
-      if (p) n.position(p);
-    });
+    restoreBase();
     showLabelsFor(mode);
   });
-  byId<HTMLInputElement>("edgesToggle").checked = defaultEdgesShown();
+  byId<HTMLInputElement>("edgesToggle").checked = mode !== "directory" || model.components.length <= EDGE_AUTO_MAX;
   resetView();
 }
 
@@ -207,10 +281,24 @@ function clearCycle(): void {
   cy.nodes(".cycnode").removeClass("cycnode");
 }
 
+function focusCrumbActions(id: string): { label: string; onClick: () => void }[] {
+  const { focusDepth } = getState();
+  if (focusDepth >= MAX_FOCUS_DEPTH) return [];
+  return [
+    {
+      label: "+ depth",
+      onClick: () => {
+        setState({ focusDepth: getState().focusDepth + 1 });
+        byId<HTMLSelectElement>("depth").value = String(getState().focusDepth);
+        focusNode(id);
+      },
+    },
+  ];
+}
+
 export function focusNode(id: string): void {
   const n = cy.getElementById(id);
   if (n.empty() || n.data("type") !== "comp") return;
-  setActiveTab("tree");
   clearCycle();
   setState({ currentFocus: id });
   const { focusDepth, focusDir } = getState();
@@ -218,6 +306,10 @@ export function focusNode(id: string): void {
   const egoNodes = idsToCollection(res.nodes);
   const egoEdges = edgeKeysToCollection(res.edgeKeys);
   cy.batch(() => {
+    // The ego neighbourhood must be fully visible even if the overview (dirs
+    // bubbles or a dead-only filter) was hiding some of its members.
+    cy.nodes('[type="dir"]').style("display", "none");
+    egoNodes.style("display", "element");
     cy.elements().addClass("faded");
     cy.edges().removeClass("show");
     egoNodes.removeClass("faded");
@@ -234,9 +326,10 @@ export function focusNode(id: string): void {
   showInspector(id);
   const reached = egoNodes.length - 1;
   const dirTxt = focusDir === "dependents" ? "dependents ↑" : focusDir === "dependencies" ? "dependencies ↓" : "both";
-  setCrumbs([
-    { label: compById.get(id)!.name + " — depth " + focusDepth + " · " + dirTxt + " · " + reached + " reached" },
-  ]);
+  setCrumbs(
+    [{ label: compById.get(id)!.name + " — depth " + focusDepth + " · " + dirTxt + " · " + reached + " reached" }],
+    focusCrumbActions(id)
+  );
 }
 
 function focusGroup(predicate: (n: any) => boolean, title: string): void {
@@ -245,6 +338,8 @@ function focusGroup(predicate: (n: any) => boolean, title: string): void {
   const ns = cy.nodes('[type="comp"]').filter(predicate);
   if (ns.empty()) return;
   cy.batch(() => {
+    cy.nodes('[type="dir"]').style("display", "none");
+    ns.style("display", "element");
     cy.elements().addClass("faded");
     cy.edges().removeClass("show");
     ns.removeClass("faded");
@@ -276,6 +371,8 @@ export function focusCycle(members: string[]): void {
   const ns = cy.nodes('[type="comp"]').filter((n: any) => set.has(n.id()));
   if (ns.empty()) return;
   cy.batch(() => {
+    cy.nodes('[type="dir"]').style("display", "none");
+    ns.style("display", "element");
     cy.elements().addClass("faded");
     cy.edges().removeClass("show");
     ns.removeClass("faded").addClass("cycnode");
@@ -301,15 +398,29 @@ export function focusCycle(members: string[]): void {
   setCrumbs([{ label: "cycle (" + members.length + ")" }]);
 }
 
+// ---- semantic zoom: expand a directory bubble into its components ----
+
+export function expandDir(dir: string): void {
+  if (!dirsOverviewActive()) return;
+  expandedDirs.add(dir);
+  applyVisibility();
+  applyEdgeToggle();
+  const ns = cy.nodes('[type="comp"]').filter((n: any) => n.data("dir") === dir);
+  if (!ns.empty()) cy.animate({ fit: { eles: ns, padding: FIT_PAD_GROUP } }, { duration: ANIM_FOCUS_MS });
+  showDirPanel(dir);
+  setCrumbs([{ label: dir + "/ — " + ns.length + " expanded · background click collapses" }]);
+}
+
 export function resetView(): void {
   setState({ currentFocus: null });
   clearCycle();
+  expandedDirs.clear();
   cy.batch(() => {
     cy.elements().removeClass("faded hi");
     cy.edges().removeClass("show");
   });
-  applyFilter();
-  if (byId<HTMLSelectElement>("filter").value === "all") restoreBase();
+  applyVisibility();
+  if (filterValue() === "all") restoreBase();
   else gridVisible();
   applyEdgeToggle();
   const vis = visibleNodes();
@@ -317,7 +428,7 @@ export function resetView(): void {
   setCrumbs(null);
 }
 
-// ---- filter ----
+// ---- visibility (filter × overview level × expanded dirs) ----
 
 function nodeMatchesFilter(n: any, f: string): boolean {
   if (f === "dead") return n.data("state") === "dead";
@@ -325,18 +436,33 @@ function nodeMatchesFilter(n: any, f: string): boolean {
   return true;
 }
 
-export function applyFilter(): void {
-  const f = byId<HTMLSelectElement>("filter").value;
+/**
+ * One place that decides what is visible: the filter hides non-matching
+ * components; the dirs overview swaps components for directory bubbles, except
+ * inside expanded directories.
+ */
+export function applyVisibility(): void {
+  const f = filterValue();
+  const dirs = dirsOverviewActive();
+  const mode = getState().layoutMode;
   cy.batch(() => {
     cy.nodes().forEach((n: any) => {
-      if (n.data("type") === "label") {
-        n.style("display", f === "all" && n.data("mode") === getState().layoutMode ? "element" : "none");
-        return;
+      const t = n.data("type");
+      if (t === "label") {
+        n.style("display", f === "all" && !dirs && n.data("mode") === mode ? "element" : "none");
+      } else if (t === "dir") {
+        n.style("display", dirs && !expandedDirs.has(n.data("dir")) ? "element" : "none");
+      } else {
+        const passes = nodeMatchesFilter(n, f);
+        const visible = dirs ? passes && expandedDirs.has(n.data("dir")) : passes;
+        n.style("display", visible ? "element" : "none");
       }
-      n.style("display", nodeMatchesFilter(n, f) ? "element" : "none");
     });
   });
 }
+
+// Back-compat name used by the controls wiring.
+export const applyFilter = applyVisibility;
 
 // ---- overview edge toggle ----
 
@@ -370,6 +496,7 @@ export function applyGraphTheme(): void {
   const hiBorder = cssVar("--hi-border");
   cy.style()
     .selector('node[type="comp"]').style("color", nodeLabel)
+    .selector('node[type="dir"]').style("color", nodeLabel)
     .selector('node[type="label"]').style("color", graphLabel)
     .selector("node.hi").style("border-color", hiBorder)
     .selector("node.match").style("border-color", hiBorder)
@@ -398,6 +525,7 @@ export { ZOOM_STEP };
 
 function wireGraphEvents(): void {
   cy.on("tap", 'node[type="comp"]', (evt: any) => focusNode(evt.target.id()));
+  cy.on("tap", 'node[type="dir"]', (evt: any) => expandDir(evt.target.data("dir")));
   cy.on("tap", 'node[type="label"]', (evt: any) => {
     const t = evt.target;
     if (t.data("mode") === getState().layoutMode && t.data("full") !== undefined && getState().layoutMode !== "clusters")
@@ -437,6 +565,19 @@ function wireTooltip(): void {
   cy.on("mouseout", 'node[type="comp"]', (evt: any) => {
     tip.style.display = "none";
     evt.target.removeClass("tiphi");
+  });
+  cy.on("mouseover", 'node[type="dir"]', (evt: any) => {
+    const d = evt.target.data();
+    tip.innerHTML =
+      "<b>" + esc(d.dir) + "/</b>" +
+      "<div>" + d.count + " component" + (d.count === 1 ? "" : "s") +
+      (d.dead ? ' · <b style="color:#f85149">' + d.dead + " dead</b>" : "") + "</div>" +
+      '<div class="t-file">click to expand</div>';
+    tip.style.display = "block";
+    moveTip(evt);
+  });
+  cy.on("mouseout", 'node[type="dir"]', () => {
+    tip.style.display = "none";
   });
   cy.on("mouseover", 'node[type="label"]', (evt: any) => {
     tip.innerHTML = "<b>" + esc(evt.target.data("label")) + "</b>";

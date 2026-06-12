@@ -143,13 +143,23 @@ deadfall report ./app -o report.html -j model.json -r structure.md
 Open `report.html` in any browser — it's fully self-contained and opens
 instantly (layout is precomputed, no in-browser physics). You get:
 
-- a **directory-clustered map** of every component — size ∝ usage; blue =
-  used, red = dead, amber = dead-in-prod
-- **search + directory tree** with per-folder dead counts
+- a **triage panel first**: dead-in-prod findings, then dead components ranked
+  by deletion payoff ("+N come along free"), cycles, hubs, and move hints —
+  click any row to see it in the graph
+- **named views** instead of knob soup — *Triage*, *Architecture*, *Hotspots*,
+  *Modules* — each bundling layout, colour, size, and edge defaults (raw
+  controls live under ⚙); blue = used, red = dead, amber = dead-in-prod
+- **semantic zoom** on big graphs: the overview opens as one bubble per
+  directory (size = component count, red slice = dead share); click a bubble to
+  expand it — the 1000-node hairball never appears
+- a **deletion cascade** in the inspector: for any dead component, the full
+  "safe to delete together" set
+- **fuzzy search** with keyboard navigation (↑↓ Enter), a clickable legend that
+  filters, and a directory tree with per-folder dead counts
 - **focus mode** — click any component to see what renders it and what it
-  renders, transitively, with depth and direction controls
-- **architecture insights** — hubs, dependency cycles, cohesion clusters, and
-  "this component probably belongs in that directory" hints
+  renders; grow the neighbourhood with the *+ depth* breadcrumb button
+- **open-in-editor links** on every file path, and a shareable URL hash that
+  deep-links the current view and focused component
 - a light/dark toggle that remembers your choice
 
 `-j model.json` dumps the raw analysis for your own scripting; `-r structure.md`

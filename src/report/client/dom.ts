@@ -8,7 +8,10 @@ export function byId<T extends HTMLElement = HTMLElement>(id: string): T {
 
 /** Escape a value for safe insertion into HTML text/attribute content. */
 export function esc(s: unknown): string {
-  return String(s).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]!);
+  return String(s).replace(
+    /[&<>"]/g,
+    (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!
+  );
 }
 
 /** Directory portion of a relative file path (".", if none). */

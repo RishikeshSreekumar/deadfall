@@ -15,42 +15,54 @@
   <span class="stat dead">dead <span id="s-dead"></span></span>
   <span class="stat dip">dead-in-prod <span id="s-dip"></span></span>
   <div class="sep"></div>
-  <label class="stat">layout
-    <select id="layout"><!-- options injected from LAYOUT_MODES --></select>
+  <label class="stat">view
+    <select id="view"><!-- options injected from VIEW_PRESETS --></select>
   </label>
-  <label class="stat">color
-    <select id="color"><!-- options injected from COLOR_ENCODINGS --></select>
-  </label>
-  <label class="stat">size
-    <select id="size"><!-- options injected from SIZE_ENCODINGS --></select>
-  </label>
-  <label class="stat">depth
-    <select id="depth">
-      <option value="1">1</option><option value="2" selected>2</option>
-      <option value="3">3</option><option value="4">4</option><option value="5">5</option>
-    </select>
-  </label>
-  <label class="stat">direction
-    <select id="dir">
-      <option value="both">both</option>
-      <option value="dependents">dependents ↑</option>
-      <option value="dependencies">dependencies ↓</option>
-    </select>
-  </label>
+  <button id="grouping" title="toggle directory bubbles / all components"></button>
   <label class="stat"><input type="checkbox" id="edgesToggle" /> edges</label>
+  <details id="adv">
+    <summary title="advanced controls">⚙</summary>
+    <div class="adv-pop">
+      <label>layout
+        <select id="layout"><!-- options injected from LAYOUT_MODES --></select>
+      </label>
+      <label>color
+        <select id="color"><!-- options injected from COLOR_ENCODINGS --></select>
+      </label>
+      <label>size
+        <select id="size"><!-- options injected from SIZE_ENCODINGS --></select>
+      </label>
+      <label>depth
+        <select id="depth">
+          <option value="1" selected>1</option><option value="2">2</option>
+          <option value="3">3</option><option value="4">4</option><option value="5">5</option>
+        </select>
+      </label>
+      <label>direction
+        <select id="dir">
+          <option value="both">both</option>
+          <option value="dependents">dependents ↑</option>
+          <option value="dependencies">dependencies ↓</option>
+        </select>
+      </label>
+    </div>
+  </details>
   <button id="reset">Reset view</button>
   <button id="theme" title="toggle light/dark">🌙</button>
   <span class="legend" id="legend"></span>
 </div>
-<div id="crumbs"><span class="cur">Overview — click a node or a component to focus</span></div>
+<div id="crumbs"><span class="cur">Overview — click a bubble or a component to dig in</span></div>
 <div id="main">
   <div id="nav">
     <div class="controls">
       <div class="tabs">
-        <button id="tab-tree" class="on">Tree</button>
-        <button id="tab-insights">Insights</button>
+        <button id="tab-triage" class="on">Triage</button>
+        <button id="tab-tree">Tree</button>
       </div>
-      <input id="search" placeholder="search component…" autocomplete="off" />
+      <div class="searchwrap">
+        <input id="search" placeholder="search components… (↑↓ Enter)" autocomplete="off" />
+        <div id="searchresults"></div>
+      </div>
       <select id="filter">
         <option value="all">all components</option>
         <option value="dead">dead only</option>
@@ -58,8 +70,8 @@
       </select>
     </div>
     <div id="navhint"></div>
+    <div id="triage"></div>
     <div id="tree"></div>
-    <div id="insights"></div>
   </div>
   <div id="cywrap">
     <div id="cy"></div>

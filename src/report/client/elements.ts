@@ -8,14 +8,25 @@ import type { Layouts } from "./context.js";
 import { nodeColor, nodeSize } from "./encodings.js";
 import type { ColorMode, SizeMode } from "./encodings.js";
 import { dirOf } from "./dom.js";
-import { STATE_SHAPE, LAYER_LABEL_DX, GROUP_LABEL_DX, GROUP_LABEL_DY } from "./constants.js";
+import {
+  STATE_SHAPE,
+  LAYER_LABEL_DX,
+  GROUP_LABEL_DX,
+  GROUP_LABEL_DY,
+  DIR_NODE_MIN,
+  DIR_NODE_SCALE,
+  DIR_EDGE_WIDTH_BASE,
+  DIR_EDGE_WIDTH_SCALE,
+} from "./constants.js";
 import { LAYOUT_MODE_IDS } from "./layout-modes.js";
+import { aggregateDirs, aggregateDirEdges } from "./graph/dirs.js";
 
 export interface ElementDef {
   data: Record<string, unknown>;
   position?: { x: number; y: number };
   selectable?: boolean;
   grabbable?: boolean;
+  classes?: string;
 }
 
 /** Component nodes, positioned from `basePos` when a position is known. */
@@ -112,6 +123,50 @@ export function buildAllLabels(layouts: Layouts | null): ElementDef[] {
     if (layouts[m]) out = out.concat(buildLabelNodes(m, layouts));
   }
   return out;
+}
+
+/** Stable element id for a directory-aggregate node. */
+export function dirNodeId(dir: string): string {
+  return "__dir__" + dir;
+}
+
+/**
+ * Directory-aggregate elements for the semantic-zoom overview: one bubble per
+ * directory (sized by member count, pie slice = dead share) positioned at the
+ * members' centroid in the directory layout, plus weighted dir→dir edges.
+ */
+export function buildDirElements(basePos: Record<string, NodePosition>): {
+  nodes: ElementDef[];
+  edges: ElementDef[];
+} {
+  const dirs = aggregateDirs(model.components, usageById, basePos);
+  const nodes: ElementDef[] = dirs.map((d) => ({
+    data: {
+      id: dirNodeId(d.dir),
+      type: "dir",
+      dir: d.dir,
+      label: (d.dir.split("/").pop() || d.dir) + " · " + d.count + (d.dead ? " (" + d.dead + " dead)" : ""),
+      count: d.count,
+      dead: d.dead,
+      size: DIR_NODE_MIN + Math.sqrt(d.count) * DIR_NODE_SCALE,
+      deadPct: d.count ? Math.round((100 * d.dead) / d.count) : 0,
+      alivePct: d.count ? 100 - Math.round((100 * d.dead) / d.count) : 100,
+    },
+    position: { x: d.x, y: d.y },
+    grabbable: false,
+  }));
+  const fileById = new Map(model.components.map((c) => [c.id, c.file]));
+  const edges: ElementDef[] = aggregateDirEdges(model.edges, fileById).map((e, i) => ({
+    data: {
+      id: "de" + i,
+      source: dirNodeId(e.from),
+      target: dirNodeId(e.to),
+      n: e.n,
+      width: DIR_EDGE_WIDTH_BASE + Math.log2(1 + e.n) * DIR_EDGE_WIDTH_SCALE,
+    },
+    classes: "diredge",
+  }));
+  return { nodes, edges };
 }
 
 /** Directed edges between real components (self-loops/dangling dropped). */

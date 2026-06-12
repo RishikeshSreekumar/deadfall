@@ -1,13 +1,19 @@
-// Side-panel rendering: the right inspector, the left directory tree + insights
+// Side-panel rendering: the right inspector, the left triage + directory-tree
 // tabs, and the breadcrumb row. Each builds markup and (re)binds its own click
 // handlers, which call back into the graph view's focus actions.
 
 import { model, compById, usageById, metricById, structure, adjacency } from "./context.js";
-import { byId, esc } from "./dom.js";
+import { byId, esc, dirOf } from "./dom.js";
 import { stateColor } from "./encodings.js";
 import { buildTree, treeFilterMatch } from "./graph/tree.js";
 import type { TreeFilter, TreeNode } from "./graph/tree.js";
-import { MAX_INSPECTOR_SITES, MAX_HUBS } from "./constants.js";
+import { cascade, cascadeSizes } from "./graph/cascade.js";
+import {
+  MAX_INSPECTOR_SITES,
+  MAX_HUBS,
+  MAX_TRIAGE_DEAD,
+  MAX_CASCADE_LIST,
+} from "./constants.js";
 import { focusNode, focusCycle, focusDirGroup, focusFileGroup, resetView } from "./cy-view.js";
 import type { SymbolKind } from "../model.js";
 
@@ -20,6 +26,36 @@ const KIND_GLYPH: Record<SymbolKind, string> = {
 function kindGlyph(kind: SymbolKind | undefined): string {
   const k = kind ?? "component";
   return '<i class="kind k-' + k + '" title="' + k + '">' + KIND_GLYPH[k] + "</i>";
+}
+
+// ---- deletion cascade ----
+
+/** A component may join a cascade when it is dead-ish and not kept on purpose. */
+function deletable(id: string): boolean {
+  const state = usageById.get(id)?.state;
+  if (state !== "dead" && state !== "dead-in-prod") return false;
+  return !compById.get(id)?.ignored;
+}
+
+function deadIds(): string[] {
+  return model.usage
+    .filter((u) => (u.state === "dead" || u.state === "dead-in-prod") && !compById.get(u.id)?.ignored)
+    .map((u) => u.id);
+}
+
+// ---- editor links ----
+
+/** vscode deep link to a file:line under the scanned project root. */
+function editorHref(file: string, line: number): string {
+  const root = model.projectRoot.replace(/\/+$/, "");
+  return "vscode://file/" + root + "/" + file + ":" + line;
+}
+
+function fileLink(file: string, line: number): string {
+  return (
+    '<a class="floc" href="' + esc(editorHref(file, line)) + '" title="open in editor">' +
+    esc(file) + ":" + line + "</a>"
+  );
 }
 
 // ---- right inspector ----
@@ -58,6 +94,23 @@ function navList(ids: string[]): string {
   );
 }
 
+/** "Deletable together" section for a dead component (empty string if none). */
+function cascadeHtml(id: string): string {
+  if (!deletable(id)) return "";
+  const ids = cascade(adjacency, id, deletable);
+  if (!ids.length)
+    return '<div class="row"><b>Deletable together</b><div class="muted">nothing else — only this component goes</div></div>';
+  const shown = ids.slice(0, MAX_CASCADE_LIST);
+  const more = ids.length - shown.length;
+  return (
+    '<div class="row cascade"><b>Deletable together (' + ids.length + ")</b>" +
+    '<div class="muted">deleting this also frees:</div>' +
+    navList(shown) +
+    (more > 0 ? '<div class="muted">…and ' + more + " more</div>" : "") +
+    "</div>"
+  );
+}
+
 /** Render the inspector for one component. */
 export function showInspector(id: string): void {
   const c = compById.get(id);
@@ -69,19 +122,34 @@ export function showInspector(id: string): void {
   const dependents = Array.from(adjacency.inAdj.get(id) || []);
   const sites = (u?.sites || [])
     .slice(0, MAX_INSPECTOR_SITES)
-    .map((s) => "<li>" + esc(s.file) + ":" + s.line + "</li>")
+    .map((s) => "<li>" + fileLink(s.file, s.line) + "</li>")
     .join("");
   panel().innerHTML =
     "<h2>" + esc(c.name) + "</h2>" +
-    '<div class="muted">' + esc(c.file) + ":" + c.line + "</div>" +
+    '<div class="muted">' + fileLink(c.file, c.line) + "</div>" +
     '<div class="row"><span class="badge ' + bcls + '">' + (u?.state || "") + "</span> " +
     '<span class="badge b-kind">' + esc(c.symbolKind) + "</span> " +
     '<span class="badge b-role">' + (m?.role || "n/a") + "</span></div>" +
     '<div class="row">fan-in <b>' + (m?.fanIn || 0) + "</b> · fan-out <b>" + (m?.fanOut || 0) + "</b><br>" +
     "prod usages <b>" + (u?.prodCount || 0) + "</b> · test/story <b>" + (u?.testCount || 0) + "</b></div>" +
+    cascadeHtml(id) +
     '<div class="row"><b>Dependencies (' + deps.length + ")</b>" + navList(deps) + "</div>" +
     '<div class="row"><b>Dependents (' + dependents.length + ")</b>" + navList(dependents) + "</div>" +
     (sites ? '<div class="row"><b>used at:</b><ul>' + sites + "</ul></div>" : "");
+  bindJumps(panel());
+}
+
+/** Summary panel for an expanded directory bubble. */
+export function showDirPanel(dir: string): void {
+  const members = model.components.filter((c) => dirOf(c.file) === dir);
+  const dead = members.filter((c) => deletable(c.id));
+  panel().innerHTML =
+    "<h2>" + esc(dir) + "/</h2>" +
+    '<div class="muted">' + members.length + " component" + (members.length === 1 ? "" : "s") +
+    (dead.length ? " · " + dead.length + " dead" : "") + "</div>" +
+    (dead.length
+      ? '<div class="row"><b>Dead here (' + dead.length + ")</b>" + navList(dead.map((c) => c.id)) + "</div>"
+      : '<div class="row muted">nothing dead in this directory 🎉</div>');
   bindJumps(panel());
 }
 
@@ -97,28 +165,42 @@ export interface Crumb {
   label: string;
 }
 
-export function setCrumbs(items: Crumb[] | null): void {
+export interface CrumbAction {
+  label: string;
+  onClick: () => void;
+}
+
+export function setCrumbs(items: Crumb[] | null, actions: CrumbAction[] = []): void {
   const el = byId("crumbs");
   if (!items) {
-    el.innerHTML = '<span class="cur">Overview — click a node or a component to focus</span>';
+    el.innerHTML = '<span class="cur">Overview — click a bubble or a component to dig in</span>';
     return;
   }
   let html = '<span class="crumb" data-reset="1">Overview</span>';
   items.forEach((it) => {
     html += ' <span class="muted">›</span> <span class="cur">' + esc(it.label) + "</span>";
   });
+  actions.forEach((a, i) => {
+    html += ' <button class="crumb-act" data-act="' + i + '">' + esc(a.label) + "</button>";
+  });
   el.innerHTML = html;
   const r = el.querySelector("[data-reset]");
   if (r) r.addEventListener("click", () => resetView());
+  el.querySelectorAll(".crumb-act").forEach((b) => {
+    b.addEventListener("click", () => actions[Number(b.getAttribute("data-act"))].onClick());
+  });
 }
 
 // ---- left-rail tabs ----
 
-export function setActiveTab(which: "tree" | "insights"): void {
+export type RailTab = "triage" | "tree";
+
+export function setActiveTab(which: RailTab): void {
+  byId("tab-triage").classList.toggle("on", which === "triage");
   byId("tab-tree").classList.toggle("on", which === "tree");
-  byId("tab-insights").classList.toggle("on", which === "insights");
+  byId("triage").style.display = which === "triage" ? "block" : "none";
   byId("tree").style.display = which === "tree" ? "block" : "none";
-  byId("insights").style.display = which === "insights" ? "block" : "none";
+  byId("navhint").style.display = which === "tree" ? "block" : "none";
 }
 
 // ---- directory tree ----
@@ -311,26 +393,59 @@ export function renderTree(): void {
   else renderTreeEager(tree, f, q);
 }
 
-// ---- insights panel ----
+// ---- triage panel (default tab: the answers, ranked) ----
 
-export function renderInsights(): void {
+function triageRow(id: string, meta: string): string {
+  const c = compById.get(id) || { name: id };
+  const u = usageById.get(id);
+  return (
+    '<div class="ins-row" data-id="' + esc(id) + '">' +
+    '<i class="sw" style="background:' + stateColor(u?.state) + '"></i>' +
+    '<span class="name">' + esc(c.name) + '</span><span class="meta">' + meta + "</span></div>"
+  );
+}
+
+export function renderTriage(): void {
   let html = "";
-  // Hubs
-  html += '<div class="ins-sec"><h3>Hubs · ' + structure.hubs.length + "</h3>";
-  if (!structure.hubs.length) html += '<div class="ins-empty">no hub crosses the threshold</div>';
+
+  // Dead in prod: shipped code nothing in prod renders — the loudest finding.
+  const dip = model.usage.filter((u) => u.state === "dead-in-prod").map((u) => u.id);
+  html += '<div class="ins-sec"><h3>Dead in prod · ' + dip.length + "</h3>";
+  if (!dip.length) html += '<div class="ins-empty">none — prod tree is clean</div>';
   else
-    html += structure.hubs
-      .slice(0, MAX_HUBS)
-      .map((id) => {
-        const c = compById.get(id) || { name: id };
-        const m = metricById.get(id);
-        return (
-          '<div class="ins-row" data-id="' + esc(id) + '"><span class="name">' + esc(c.name) +
-          '</span><span class="meta">in ' + (m?.fanIn || 0) + " · out " + (m?.fanOut || 0) + "</span></div>"
-        );
-      })
+    html += dip
+      .slice()
+      .sort((a, b) => (usageById.get(b)?.testCount || 0) - (usageById.get(a)?.testCount || 0))
+      .map((id) => triageRow(id, (usageById.get(id)?.testCount || 0) + " test uses"))
       .join("");
   html += "</div>";
+
+  // Dead components ranked by cascade size: biggest deletion payoff first.
+  const dead = deadIds();
+  const sizes = cascadeSizes(adjacency, dead, deletable);
+  const ranked = dead
+    .slice()
+    .sort(
+      (a, b) =>
+        (sizes.get(b) || 0) - (sizes.get(a) || 0) ||
+        (compById.get(a)?.name || a).localeCompare(compById.get(b)?.name || b)
+    );
+  html += '<div class="ins-sec"><h3>Dead code · ' + dead.length + "</h3>";
+  if (!dead.length) html += '<div class="ins-empty">nothing dead 🎉</div>';
+  else {
+    html += '<div class="ins-sub">ranked by deletion payoff — "+N" comes along free</div>';
+    html += ranked
+      .slice(0, MAX_TRIAGE_DEAD)
+      .map((id) => {
+        const n = sizes.get(id) || 0;
+        return triageRow(id, n ? "+" + n + " with it" : "");
+      })
+      .join("");
+    if (ranked.length > MAX_TRIAGE_DEAD)
+      html += '<div class="ins-empty">…and ' + (ranked.length - MAX_TRIAGE_DEAD) + " more in the tree tab</div>";
+  }
+  html += "</div>";
+
   // Cycles
   html += '<div class="ins-sec"><h3>Cycles · ' + structure.cycles.length + "</h3>";
   if (!structure.cycles.length) html += '<div class="ins-empty">graph is acyclic 🎉</div>';
@@ -345,6 +460,20 @@ export function renderInsights(): void {
       })
       .join("");
   html += "</div>";
+
+  // Hubs
+  html += '<div class="ins-sec"><h3>Hubs · ' + structure.hubs.length + "</h3>";
+  if (!structure.hubs.length) html += '<div class="ins-empty">no hub crosses the threshold</div>';
+  else
+    html += structure.hubs
+      .slice(0, MAX_HUBS)
+      .map((id) => {
+        const m = metricById.get(id);
+        return triageRow(id, "in " + (m?.fanIn || 0) + " · out " + (m?.fanOut || 0));
+      })
+      .join("");
+  html += "</div>";
+
   // Moves
   html += '<div class="ins-sec"><h3>Move hints · ' + structure.suggestedMoves.length + "</h3>";
   if (!structure.suggestedMoves.length)
@@ -362,12 +491,12 @@ export function renderInsights(): void {
       .join("");
   html += "</div>";
 
-  const insEl = byId("insights");
-  insEl.innerHTML = html;
-  insEl.querySelectorAll(".ins-row[data-id]").forEach((el) => {
+  const triEl = byId("triage");
+  triEl.innerHTML = html;
+  triEl.querySelectorAll(".ins-row[data-id]").forEach((el) => {
     el.addEventListener("click", () => focusNode(el.getAttribute("data-id")!));
   });
-  insEl.querySelectorAll(".ins-row[data-cycle]").forEach((el) => {
+  triEl.querySelectorAll(".ins-row[data-cycle]").forEach((el) => {
     el.addEventListener("click", () => focusCycle(structure.cycles[Number(el.getAttribute("data-cycle"))]));
   });
 }

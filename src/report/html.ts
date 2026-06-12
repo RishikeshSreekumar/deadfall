@@ -52,11 +52,13 @@ function scriptSafe(s: string): string {
  * network dependency — open the file directly in a browser.
  *
  * The graph uses precomputed positions (`model.layouts`) via cytoscape's
- * `preset` layout so it opens instantly with no in-browser physics. It exposes
- * three switchable arrangements (directory / dependency-layers / cohesion-
- * clusters), color/size encodings (state / role / cluster, usage / fan-in /
- * fan-out), a dependents↔dependencies inspector, and an Insights panel surfacing
- * hubs, dependency cycles, and restructuring (move) hints.
+ * `preset` layout so it opens instantly with no in-browser physics. The UI is
+ * task-shaped: a Triage panel (dead code ranked by deletion payoff, cycles,
+ * hubs, move hints) lands first; named view presets (Triage / Architecture /
+ * Hotspots / Modules) bundle layout + colour + size encodings, with the raw
+ * knobs under an advanced disclosure; large graphs open as per-directory
+ * bubbles (semantic zoom) that expand on click; the inspector shows each dead
+ * component's "deletable together" cascade and open-in-editor links.
  */
 export function renderHtml(model: ReportModel): string {
   const data = scriptSafe(JSON.stringify(model));

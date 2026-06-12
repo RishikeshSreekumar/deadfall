@@ -43,8 +43,10 @@ export const GROUP_LABEL_DY = -34; // above a directory/cluster group
 // Grid packing for filtered/overview fallback layout.
 export const GRID_SPACING = 64;
 
-// Focus/ego navigation.
-export const DEFAULT_FOCUS_DEPTH = 2;
+// Focus/ego navigation. Depth starts shallow; the breadcrumb "+ depth" button
+// grows the neighbourhood on demand.
+export const DEFAULT_FOCUS_DEPTH = 1;
+export const MAX_FOCUS_DEPTH = 5;
 
 // Zoom controls.
 export const ZOOM_STEP = 1.4;
@@ -59,7 +61,24 @@ export const SEARCH_DEBOUNCE_MS = 120;
 
 // Panel list caps.
 export const MAX_INSPECTOR_SITES = 30;
-export const MAX_HUBS = 25;
+export const MAX_HUBS = 10;
+export const MAX_TRIAGE_DEAD = 50;
+export const MAX_CASCADE_LIST = 30;
+
+// Search palette.
+export const MAX_SEARCH_RESULTS = 20;
+
+// Semantic zoom: above this component count the overview starts as directory
+// bubbles instead of every node ("auto" presets); below it, edges default on.
+export const DIR_OVERVIEW_THRESHOLD = 200;
+export const EDGE_AUTO_MAX = 300;
+
+// Directory-bubble sizing: diameter grows with sqrt(member count).
+export const DIR_NODE_MIN = 30;
+export const DIR_NODE_SCALE = 14;
+// Aggregated dir→dir edge width grows with log of collapsed edge count.
+export const DIR_EDGE_WIDTH_BASE = 1;
+export const DIR_EDGE_WIDTH_SCALE = 1.6;
 
 // Large-graph scaling (level-of-detail). Above this component count the graph
 // is treated as "large": node labels only appear once zoomed in far enough, so

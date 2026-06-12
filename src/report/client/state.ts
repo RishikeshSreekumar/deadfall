@@ -6,12 +6,17 @@
 import type { LayoutMode } from "../model.js";
 import type { ColorMode, SizeMode } from "./encodings.js";
 import type { EgoDir } from "./graph/ego.js";
+import type { PresetId } from "./presets.js";
 import { DEFAULT_FOCUS_DEPTH } from "./constants.js";
 
 export interface UiState {
+  /** Active named view, or "custom" once an advanced knob is touched. */
+  preset: PresetId | "custom";
   colorMode: ColorMode;
   sizeMode: SizeMode;
   layoutMode: LayoutMode;
+  /** Overview granularity: directory bubbles or every component. */
+  overviewLevel: "dirs" | "comps";
   focusDepth: number;
   focusDir: EgoDir;
   /** Currently-focused component id, or null in overview. */
@@ -19,9 +24,11 @@ export interface UiState {
 }
 
 const state: UiState = {
+  preset: "triage",
   colorMode: "state",
   sizeMode: "usage",
   layoutMode: "directory",
+  overviewLevel: "comps",
   focusDepth: DEFAULT_FOCUS_DEPTH,
   focusDir: "both",
   currentFocus: null,

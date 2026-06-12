@@ -29,10 +29,11 @@ export function clusterColor(id: string): string {
   return "hsl(" + (h % 360) + ",55%,60%)";
 }
 
+// State legend doubles as a filter: clicking an entry applies it to the graph.
 const STATE_LEGEND =
-  '<span><i class="dot" style="background:var(--used)"></i>used</span>' +
-  '<span><i class="lg-tri"></i>dead</span>' +
-  '<span><i class="lg-sq"></i>dead-in-prod</span>';
+  '<span data-filter="all" title="click: show everything"><i class="dot" style="background:var(--used)"></i>used</span>' +
+  '<span data-filter="dead" title="click: dead only"><i class="lg-tri"></i>dead</span>' +
+  '<span data-filter="dead-in-prod" title="click: dead-in-prod only"><i class="lg-sq"></i>dead-in-prod</span>';
 
 function roleLegend(): string {
   return (Object.keys(ROLE_COLORS) as (keyof typeof ROLE_COLORS)[])
